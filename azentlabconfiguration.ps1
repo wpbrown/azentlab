@@ -15,8 +15,7 @@ Configuration AzEntLabConfiguration
         [string]$DomainNetbiosName
     )
 
-    # Test
-
+    # Using a single import call results in an error compiling in Azure Automation DSC.
     Import-DscResource -ModuleName xActiveDirectory
     Import-DscResource -ModuleName ComputerManagementDSC
     Import-DscResource -ModuleName PSDscResources
