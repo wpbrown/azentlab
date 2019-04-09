@@ -15,6 +15,8 @@ Configuration AzEntLabConfiguration
         [string]$DomainNetbiosName
     )
 
+    # Test
+
     Import-DscResource -ModuleName xActiveDirectory
     Import-DscResource -ModuleName ComputerManagementDSC
     Import-DscResource -ModuleName PSDscResources
