@@ -1,4 +1,4 @@
-\*\* This project is in progress of being migrated/rebuilt from the [OAKProxy TestEnv](https://github.com/wpbrown/oakproxy/tree/master/testenv). \*\*
+\*\* This project is in the process of being migrated/rebuilt from the [OAKProxy TestEnv](https://github.com/wpbrown/oakproxy/tree/master/testenv). \*\*
 
 # Azure Enterprise Lab
 
