@@ -5,48 +5,14 @@
     "adminPassword": {
       "type": "securestring",
       "metadata": {
-        "description": "Password for the domain admin (xoda) and local admins (localadmin)."
+          "description": "Password for the domain admin (xoda) and local admins (localadmin)."
       }
     },
-    "userPassword": {
-      "type": "securestring",
-      "metadata": {
-        "description": "Password for the domain user (user1, user2) and service accounts (xsokprox)."
-      }
-    },
-    "domainName": {
+    "azentlabManagementResourceGroup": {
       "type": "string",
-      "defaultValue": "contoso.com",
+      "defaultValue": "azentlab-mgmt-rg",
       "metadata": {
-        "description": "Name of the lab AD DS domain."
-      }
-    },
-    "domainNetbiosName": {
-      "type": "string",
-      "defaultValue": "contoso",
-      "metadata": {
-        "description": "Netbios name of the lab AD DS domain."
-      }
-    },
-    "sourceIp": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Allow access to the lab environment from this IP. (optional: A VPN gateway is created if an IP is not provided)"
-      }
-    },
-    "dnsPrefix": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Unique prefix for public DNS names of the VMs. (required only if 'sourceIp' is provided)"
-      }
-    },
-    "vpnCaCert": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "If using VPN gateway to connect to the lab, provide a CA cert. (optional: This can be done in the portal later)"
+        "description": "Resource group with lab management resources."
       }
     },
     "shutdownTime": {
@@ -70,29 +36,129 @@
         "description": "Email to alert before shutdown."
       }
     },
+    "labNetworkAddressSpace": {
+      "type": "string",
+      "defaultValue": "10.0.0.0/22",
+      "metadata": {
+        "description": "Address space for the lab network."
+      }
+    },
+    "labNetworkSubnet": {
+      "type": "string",
+      "defaultValue": "10.0.2.0/23"
+    },
+    "labNetworkGatewaySubnet": {
+      "type": "string",
+      "defaultValue": "10.0.0.0/27"
+    },
+    "labNetworkAppGatewaySubnet": {
+      "type": "string",
+      "defaultValue": "10.0.0.32/28"
+    },
+    "labNetworkDomainControllerIp": {
+      "type": "string",
+      "defaultValue": "10.0.2.10"
+    },
+    "labNetworkP2sVpnClients": {
+      "type": "string",
+      "defaultValue": "10.0.4.0/24"
+    },
+    "labNetworkIngressAllowed": {
+      "type": "array",
+      "defaultValue": [
+        "[parameters('labNetworkP2sVpnClients')]"
+      ]
+    },
+    "vpnCaCert": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "If using VPN P2S connections to connect to the lab, provide a CA cert."
+      }
+    },
     "vmSize": {
       "type": "string",
-      "defaultValue": "Standard_A2_v2"
+      "defaultValue": "Standard_B2s"
     },
     "diskSku": {
       "type": "string",
       "defaultValue": "StandardSSD_LRS"
     },
-    "artifactsUrl": {
+    "devVmSize": {
       "type": "string",
-      "defaultValue": "https://github.com/wpbrown/oakproxy/releases/download/lab_artifacts"
+      "defaultValue": "Standard_D4s_v3"
+    },
+    "devDiskSku": {
+      "type": "string",
+      "defaultValue": "Premium_LRS"
+    },
+    "devVmImageSku": {
+      "type": "string",
+      "defaultValue": "vs-2019-ent-ws2019"
     }
   },
   "variables": {
-    "dnsPrefix": "[concat(parameters('dnsPrefix'), '-')]",
-    "shutdownVms": [
-      "addc", "client"
-    ],
-    "useVpnNetworking": "[empty(parameters('sourceIp'))]"
+    "devServerImage": {
+      "publisher": "microsoftvisualstudio",
+      "offer": "visualstudio2019",
+      "sku": "[parameters('devVmImageSku')]",
+      "version": "latest"
+    },
+    "serverImage": {
+      "publisher": "MicrosoftWindowsServer",
+      "offer": "WindowsServer",
+      "sku": "2019-Datacenter-smalldisk",
+      "version": "latest"
+    },
+    "clientImage": {
+      "publisher": "MicrosoftWindowsDesktop",
+      "offer": "Windows-10",
+      "sku": "rs5-enterprisen",
+      "version": "latest"
+    },
+    "vmConfigurations": [
+      {
+        "name": "domserv01",
+        "licenseType": "Windows_Server",
+        "dscNodeConfiguration": "AzEntLabConfiguration.DomainController",
+        "ipAddress": "[parameters('labNetworkDomainControllerIp')]",
+        "dnsServers": [
+          "168.63.129.16"
+        ],
+        "adminUsername": "xoda"
+      },
+      {
+        "name": "domserv02",
+        "licenseType": "Windows_Server",
+        "dscNodeConfiguration": "AzEntLabConfiguration.FederationServer"
+      },
+      {
+        "name": "appserv01",
+        "licenseType": "Windows_Server",
+        "dscNodeConfiguration": "AzEntLabConfiguration.BackendServer"
+      },
+      {
+        "name": "appserv02",
+        "licenseType": "Windows_Server",
+        "dscNodeConfiguration": "AzEntLabConfiguration.MiddlewareServer"
+      },
+      {
+        "name": "appdev01",
+        "image": "[variables('devServerImage')]",
+        "vmSize": "[parameters('devVmSize')]",
+        "diskSku": "[parameters('devDiskSku')]",
+        "licenseType": "Windows_Server",
+        "dscNodeConfiguration": "AzEntLabConfiguration.DevServer"
+      },
+      {
+        "name": "client01",
+        "licenseType": "Windows_Client",
+        "dscNodeConfiguration": "AzEntLabConfiguration.Client"
+      }
+    ]
   },
   "resources": [
     {
-      "condition": "[not(variables('useVpnNetworking'))]",
       "apiVersion": "2018-08-01",
       "type": "Microsoft.Network/networkSecurityGroups",
       "name": "lab-nsg",
@@ -100,13 +166,13 @@
       "properties": {
         "securityRules": [
           {
-            "name": "rdp-nsgr",
+            "name": "ingress-nsgr",
             "properties": {
-              "description": "Allow RDP from client.",
+              "description": "Allow Ingress to the Lab.",
               "protocol": "*",
               "sourcePortRange": "*",
-              "destinationPortRange": "3389",
-              "sourceAddressPrefix": "[parameters('sourceIp')]",
+              "destinationPortRange": "*",
+              "sourceAddressPrefixes": "[parameters('labNetworkIngressAllowed')]",
               "destinationAddressPrefix": "VirtualNetwork",
               "access": "Allow",
               "priority": 100,
@@ -127,27 +193,35 @@
       "properties": {
         "addressSpace": {
           "addressPrefixes": [
-            "10.0.0.0/16"
+            "[parameters('labNetworkAddressSpace')]"
           ]
         },
         "subnets": [
           {
-            "name": "labsubnet",
+            "name": "LabSubnet",
             "properties": {
-              "addressPrefix": "10.0.0.0/24",
-              "networkSecurityGroup": "[if(variables('useVpnNetworking'), json('null'), json(concat('{ \"id\": \"', resourceId('Microsoft.Network/networkSecurityGroups', 'lab-nsg'), '\" }')))]"
+              "addressPrefix": "[parameters('labNetworkSubnet')]",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', 'lab-nsg')]"
+              }
+            }
+          },
+          {
+            "name": "ApplicationGatewaySubnet",
+            "properties": {
+              "addressPrefix": "[parameters('labNetworkAppGatewaySubnet')]"
             }
           },
           {
             "name": "GatewaySubnet",
             "properties": {
-              "addressPrefix": "10.0.1.0/24"
+              "addressPrefix": "[parameters('labNetworkGatewaySubnet')]"
             }
           }
         ],
         "dhcpOptions": {
           "dnsServers": [
-            "10.0.0.10"
+            "[parameters('labNetworkDomainControllerIp')]"
           ]
         }
       }
@@ -155,122 +229,9 @@
     {
       "apiVersion": "2018-08-01",
       "type": "Microsoft.Network/networkInterfaces",
-      "name": "addc-nic",
+      "name": "[concat(variables('vmConfigurations')[copyIndex()].name, '-nic')]",
       "location": "[resourceGroup().location]",
       "dependsOn": [
-        "Microsoft.Network/publicIPAddresses/addc-pip",
-        "Microsoft.Network/virtualNetworks/lab-vnet"
-      ],
-      "properties": {
-        "ipConfigurations": [
-          {
-            "name": "ipconfig1",
-            "properties": {
-              "privateIPAllocationMethod": "Static",
-              "privateIPAddress": "10.0.0.10",
-              "publicIPAddress": "[if(variables('useVpnNetworking'), json('null'), json(concat('{ \"id\": \"', resourceId('Microsoft.Network/publicIPAddresses', 'addc-pip'), '\" }')))]",
-              "subnet": {
-                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'lab-vnet', 'labsubnet')]"
-              }
-            }
-          }
-        ],
-        "dnsSettings": {
-          "dnsServers": [
-            "168.63.129.16"
-          ]
-        }
-      }
-    },
-    {
-      "apiVersion": "2018-06-01",
-      "type": "Microsoft.Compute/virtualMachines",
-      "name": "addc-vm",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "addc-nic"
-      ],
-      "properties": {
-        "hardwareProfile": {
-          "vmSize": "[parameters('vmSize')]"
-        },
-        "osProfile": {
-          "computerName": "addc",
-          "adminUsername": "xoda",
-          "adminPassword": "[parameters('adminPassword')]"
-        },
-        "storageProfile": {
-          "imageReference": {
-            "publisher": "MicrosoftWindowsServer",
-            "offer": "WindowsServer",
-            "sku": "2016-Datacenter-smalldisk",
-            "version": "latest"
-          },
-          "osDisk": {
-            "name": "addc-os-dsk",
-            "caching": "ReadWrite",
-            "createOption": "FromImage",
-            "diskSizeGB": 32,
-            "managedDisk": {
-              "storageAccountType": "[parameters('diskSku')]"
-            }
-          }
-        },
-        "networkProfile": {
-          "networkInterfaces": [
-            {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', 'addc-nic')]"
-            }
-          ]
-        },
-        "licenseType": "Windows_Server"
-      },
-      "resources": [
-        {
-          "type": "extensions",
-          "name": "addc-dscext",
-          "apiVersion": "2018-06-01",
-          "location": "[resourceGroup().location]",
-          "dependsOn": [
-            "[resourceId('Microsoft.Compute/virtualMachines', 'addc-vm')]"
-          ],
-          "properties": {
-            "publisher": "Microsoft.Powershell",
-            "type": "DSC",
-            "typeHandlerVersion": "2.77",
-            "autoUpgradeMinorVersion": true,
-            "forceUpdateTag": "4",
-            "settings": {
-              "configurationArguments": {
-                "RegistrationUrl": "[reference(resourceId('Microsoft.Automation/automationAccounts/', 'domainlab-aa'), '2018-01-15').registrationUrl]",
-                "NodeConfigurationName": "AzEntLabConfiguration.DomainController",
-                "ConfigurationMode": "ApplyandAutoCorrect",
-                "RebootNodeIfNeeded": true,
-                "ActionAfterReboot": "ContinueConfiguration"
-              },
-              "advancedOptions": {
-                "forcePullAndApply": false
-              }
-            },
-            "protectedSettings": {
-              "configurationArguments": {
-                "RegistrationKey": {
-                  "UserName": "not_used",
-                  "Password": "[listKeys(resourceId('Microsoft.Automation/automationAccounts/', 'domainlab-aa'), '2018-01-15').Keys[0].value]"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "apiVersion": "2018-08-01",
-      "type": "Microsoft.Network/networkInterfaces",
-      "name": "client-nic",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "client-pip",
         "lab-vnet"
       ],
       "properties": {
@@ -278,68 +239,74 @@
           {
             "name": "ipconfig1",
             "properties": {
-              "privateIPAllocationMethod": "Static",
-              "privateIPAddress": "10.0.0.13",
-              "publicIPAddress": "[if(variables('useVpnNetworking'), json('null'), json(concat('{ \"id\": \"', resourceId('Microsoft.Network/publicIPAddresses', 'client-pip'), '\" }')))]",
+              "privateIPAllocationMethod": "[if(contains(variables('vmConfigurations')[copyIndex()],'ipAddress'),'Static','Dynamic')]",
+              "privateIPAddress": "[if(contains(variables('vmConfigurations')[copyIndex()],'ipAddress'),variables('vmConfigurations')[copyIndex()].ipAddress,json('null'))]",
               "subnet": {
                 "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'lab-vnet', 'labsubnet')]"
               }
             }
           }
-        ]
+        ],
+        "dnsSettings": {
+          "dnsServers": "[if(contains(variables('vmConfigurations')[copyIndex()],'dnsServers'),variables('vmConfigurations')[copyIndex()].dnsServers,json('null'))]"
+        }
+      },
+      "copy": {
+        "name": "nicCopy",
+        "count": "[length(variables('vmConfigurations'))]"
       }
     },
     {
       "apiVersion": "2018-06-01",
       "type": "Microsoft.Compute/virtualMachines",
-      "name": "client-vm",
+      "name": "[concat(variables('vmConfigurations')[copyIndex()].name, '-vm')]",
       "location": "[resourceGroup().location]",
       "dependsOn": [
-        "client-nic",
-        "[resourceId('Microsoft.Compute/virtualMachines/extensions', 'addc-vm', 'addc-dscext')]"
+        "[concat(variables('vmConfigurations')[copyIndex()].name, '-nic')]",
+        "[if(equals(copyIndex(), 0), 'lab-vnet', concat(variables('vmConfigurations')[0].name, '-dscext'))]"
       ],
       "properties": {
         "hardwareProfile": {
-          "vmSize": "[parameters('vmSize')]"
+          "vmSize": "[if(contains(variables('vmConfigurations')[copyIndex()],'vmSize'),variables('vmConfigurations')[copyIndex()].vmSize,parameters('vmSize'))]"
         },
         "osProfile": {
-          "computerName": "client",
-          "adminUsername": "localadmin",
+          "computerName": "[variables('vmConfigurations')[copyIndex()].name]",
+          "adminUsername": "[if(contains(variables('vmConfigurations')[copyIndex()],'adminUsername'),variables('vmConfigurations')[copyIndex()].adminUsername,'localadmin')]",
           "adminPassword": "[parameters('adminPassword')]"
         },
         "storageProfile": {
-          "imageReference": {
-            "publisher": "MicrosoftWindowsDesktop",
-            "offer": "Windows-10",
-            "sku": "rs5-pro",
-            "version": "latest"
-          },
+          "imageReference": "[if(contains(variables('vmConfigurations')[copyIndex()], 'image'), variables('vmConfigurations')[copyIndex()].image, if(equals(variables('vmConfigurations')[copyIndex()].licenseType, 'Windows_Server'), variables('serverImage'), variables('clientImage')))]",
           "osDisk": {
-            "name": "client-os-dsk",
+            "name": "[concat(variables('vmConfigurations')[copyIndex()].name, '-os-dsk')]",
             "caching": "ReadWrite",
             "createOption": "FromImage",
             "managedDisk": {
-              "storageAccountType": "[parameters('diskSku')]"
+              "storageAccountType": "[if(contains(variables('vmConfigurations')[copyIndex()],'diskSku'),variables('vmConfigurations')[copyIndex()].diskSku,parameters('diskSku'))]"
             }
           }
         },
         "networkProfile": {
           "networkInterfaces": [
             {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', 'client-nic')]"
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('vmConfigurations')[copyIndex()].name, '-nic'))]"
             }
           ]
         },
-        "licenseType": "Windows_Client"
+        "licenseType": "Windows_Server"
+      },
+      "copy": {
+        "name": "vmCopy",
+        "count": "[length(variables('vmConfigurations'))]"
       },
       "resources": [
         {
-          "apiVersion": "2018-06-01",
+          "condition": "[equals(variables('vmConfigurations')[copyIndex()].licenseType,'Windows_Client')]",
           "type": "extensions",
-          "name": "client-cmdext",
+          "name": "[concat(variables('vmConfigurations')[copyIndex()].name, '-cmdext')]",
+          "apiVersion": "2018-06-01",
           "location": "[resourceGroup().location]",
           "dependsOn": [
-            "client-vm"
+            "[concat(variables('vmConfigurations')[copyIndex()].name, '-vm')]"
           ],
           "properties": {
             "publisher": "Microsoft.Compute",
@@ -353,36 +320,36 @@
         },
         {
           "type": "extensions",
-          "name": "client-dscext",
+          "name": "[concat(variables('vmConfigurations')[copyIndex()].name, '-dscext')]",
           "apiVersion": "2018-06-01",
           "location": "[resourceGroup().location]",
           "dependsOn": [
-            "client-vm",
-            "[resourceId('Microsoft.Compute/virtualMachines/extensions', 'client-vm', 'client-cmdext')]"
+            "[concat(variables('vmConfigurations')[copyIndex()].name, '-vm')]",
+            "[if(equals(variables('vmConfigurations')[copyIndex()].licenseType,'Windows_Client'),concat(variables('vmConfigurations')[copyIndex()].name, '-cmdext'),'lab-vnet')]"
           ],
           "properties": {
             "publisher": "Microsoft.Powershell",
             "type": "DSC",
             "typeHandlerVersion": "2.77",
             "autoUpgradeMinorVersion": true,
-            "forceUpdateTag": "2",
+            "forceUpdateTag": "1",
             "settings": {
               "configurationArguments": {
-                "RegistrationUrl": "[reference(resourceId('Microsoft.Automation/automationAccounts/', 'domainlab-aa'), '2018-01-15').registrationUrl]",
-                "NodeConfigurationName": "AzEntLabConfiguration.Client",
+                "RegistrationUrl": "[reference(resourceId(parameters('azentlabManagementResourceGroup'), 'Microsoft.Automation/automationAccounts/', 'lab-aa'), '2018-01-15').registrationUrl]",
+                "NodeConfigurationName": "[variables('vmConfigurations')[copyIndex()].dscNodeConfiguration]",
                 "ConfigurationMode": "ApplyandAutoCorrect",
                 "RebootNodeIfNeeded": true,
                 "ActionAfterReboot": "ContinueConfiguration"
               },
               "advancedOptions": {
-                "forcePullAndApply": false
+                "forcePullAndApply": "[equals(copyIndex(), 0)]"
               }
             },
             "protectedSettings": {
               "configurationArguments": {
                 "RegistrationKey": {
                   "UserName": "not_used",
-                  "Password": "[listKeys(resourceId('Microsoft.Automation/automationAccounts/', 'domainlab-aa'), '2018-01-15').Keys[0].value]"
+                  "Password": "[listKeys(resourceId(parameters('azentlabManagementResourceGroup'), 'Microsoft.Automation/automationAccounts/', 'lab-aa'), '2018-01-15').Keys[0].value]"
                 }
               }
             }
@@ -391,26 +358,9 @@
       ]
     },
     {
-      "condition": "[not(variables('useVpnNetworking'))]",
-      "apiVersion": "2018-08-01",
-      "type": "Microsoft.Network/publicIPAddresses",
-      "name": "[concat(variables('shutdownVms')[copyIndex()], '-pip')]",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "publicIPAllocationMethod": "Dynamic",
-        "dnsSettings": {
-          "domainNameLabel": "[concat(variables('dnsPrefix'),variables('shutdownVms')[copyIndex()])]"
-        }
-      },
-      "copy": {
-        "name": "pipcopy",
-        "count": "[length(variables('shutdownVms'))]"
-      }
-    },
-    {
       "apiVersion": "2018-09-15",
       "type": "Microsoft.DevTestLab/schedules",
-      "name": "[concat('shutdown-computevm-', variables('shutdownVms')[copyIndex()], '-vm')]",
+      "name": "[concat('shutdown-computevm-', variables('vmConfigurations')[copyIndex()].name, '-vm')]",
       "location": "[resourceGroup().location]",
       "properties": {
         "status": "Enabled",
@@ -424,18 +374,17 @@
           "timeInMinutes": 30,
           "emailRecipient": "[parameters('shutdownAlertMail')]"
         },
-        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('shutdownVms')[copyIndex()], '-vm'))]"
+        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('vmConfigurations')[copyIndex()].name, '-vm'))]"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('shutdownVms')[copyIndex()], '-vm'))]"
+        "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('vmConfigurations')[copyIndex()].name, '-vm'))]"
       ],
       "copy": {
-        "name": "shutdowncopy",
-        "count": "[length(variables('shutdownVms'))]"
+        "name": "shutdownCopy",
+        "count": "[length(variables('vmConfigurations'))]"
       }
     },
     {
-      "condition": "[variables('useVpnNetworking')]",
       "apiVersion": "2018-08-01",
       "type": "Microsoft.Network/publicIPAddresses",
       "name": "lab-vgw-pip",
@@ -445,7 +394,6 @@
       }
     },
     {
-      "condition": "[variables('useVpnNetworking')]",
       "apiVersion": "2018-08-01",
       "type": "Microsoft.Network/virtualNetworkGateways",
       "name": "lab-vgw",
@@ -477,7 +425,7 @@
         "vpnClientConfiguration": {
           "vpnClientAddressPool": {
             "addressPrefixes": [
-              "10.1.0.0/16"
+              "[parameters('labNetworkP2sVpnClients')]"
             ]
           },
           "vpnClientProtocols": [
@@ -487,8 +435,8 @@
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Network/publicIPAddresses', 'lab-vgw-pip')]",
-        "[resourceId('Microsoft.Network/virtualNetworks', 'lab-vnet')]"
+        "lab-vgw-pip",
+        "lab-vnet"
       ]
     }
   ],

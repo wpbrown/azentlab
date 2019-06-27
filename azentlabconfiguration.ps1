@@ -12,13 +12,17 @@ Configuration AzEntLabConfiguration
         [string]$DomainName,
 
         [Parameter(Mandatory)]
-        [string]$DomainNetbiosName
+        [string]$DomainNetbiosName,
+
+        [Parameter(Mandatory)]
+        [string]$DeveloperName
     )
 
     # Using a single import call results in an error compiling in Azure Automation DSC.
     Import-DscResource -ModuleName xActiveDirectory
     Import-DscResource -ModuleName ComputerManagementDSC
     Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName AzEntLabResources
 
     $CorpDomainName = "corp.$DomainName"
     $RootDN = "DC=$($CorpDomainName.Replace('.', ',DC='))"
@@ -88,7 +92,8 @@ Configuration AzEntLabConfiguration
             ForestName = $CorpDomainName
             UserPrincipalNameSuffixToAdd = "$DomainName", "local.$DomainName", "fed.$DomainName"
             ServicePrincipalNameSuffixToAdd = "$DomainName"
-            DependsOn = '[xADDomain]LabDomain'
+            DependsOn = '[xADDomain]LabDomain', '[xADOrganizationalUnit]StandardClientsOU', 
+                '[xADOrganizationalUnit]StandardServersOU', '[xADOrganizationalUnit]PrivilegedServersOU'
         }
 
         xADUser xoda {
@@ -98,7 +103,8 @@ Configuration AzEntLabConfiguration
             PasswordNeverExpires = $true
             Path = "OU=Privileged Users,$RootDN"
             UserPrincipalName = "xoda@$DomainName"
-            CommonName = 'Rick Sanchez (xoda)'
+            # CommonName = 'Rick Sanchez (xoda)' Can't have path and commonname set together due to bug
+            # https://github.com/PowerShell/xActiveDirectory/issues/402
             GivenName = 'Rick'
             Surname = 'Sanchez'
             Description = 'The domain administrator. Respect.'
@@ -160,39 +166,82 @@ Configuration AzEntLabConfiguration
             Description = 'Normal synced domain user with Federation.'
             DependsOn = '[xADOrganizationalUnit]StandardUsersOU', '[xADForestProperties]ForestProps'
         }
+
+        xADUser developerUser {
+            DomainName = $CorpDomainName
+            UserName = $DeveloperName
+            Password = $UserPassword
+            PasswordNeverExpires = $true
+            Path = "OU=Standard Users,$RootDN"
+            UserPrincipalName = "$DeveloperName@$DomainName"
+            CommonName = "$DeveloperName ($DeveloperName)"
+            Description = 'The lab developers user.'
+            DependsOn = '[xADOrganizationalUnit]StandardUsersOU', '[xADForestProperties]ForestProps'
+        }
     }
 
     Node Client
     {
-        WaitForAll WaitForDC {
-            NodeName = 'addc'
-            ResourceName = '[xADOrganizationalUnit]StandardClientsOU'
-        }
-
-        Computer JoinComputer {
-            Name = 'localhost'
-            DomainName = $CorpDomainName
-            Credential = $AdminPassword
+        LabDomainMachine Initialize {
+            AdminPassword = $AdminPassword
+            JoinDomain = $CorpDomainName
             JoinOU = "OU=Standard Clients,$RootDN"
-            DependsOn = '[WaitForAll]WaitForDC'
         }
 
-        Group RdpUsers {
+        Group RemoteUsers {
             GroupName = 'Remote Desktop Users'
-            MembersToInclude = @("$DomainNetbiosName\user01", "$DomainNetbiosName\user02")
-            DependsOn = '[Computer]JoinComputer'
+            MembersToInclude = @("$DomainNetbiosName\Domain Users")
+            DependsOn = '[LabDomainMachine]Initialize'
         }
 
-        foreach ($mode in @('SOFTWARE', 'SOFTWARE\WOW6432Node')) {
-            foreach ($config in @('Domains', 'EscDomains')) {
-                Registry "LocalZone-$($mode.replace('\','-'))-$config" {
-                    Key = "HKEY_LOCAL_MACHINE\$mode\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\$config\$DomainName\*"
-                    ValueName = '*'
-                    Force = $true
-                    ValueData = '1'
-                    ValueType = 'Dword'
-                }
-            }
+        DomainTrustedZone TrustLocalDomain {
+            DomainName = $DomainName
+        }
+    }
+
+    Node DevServer
+    {
+        LabDomainMachine Initialize {
+            AdminPassword = $AdminPassword
+            JoinDomain = $CorpDomainName
+            JoinOU = "OU=Standard Servers,$RootDN"
+        }
+
+        Group RemoteUsers {
+            GroupName = 'Administrators'
+            MembersToInclude = @("$DomainNetbiosName\$DeveloperName")
+            DependsOn = '[LabDomainMachine]Initialize'
+        }
+
+        DomainTrustedZone TrustLocalDomain {
+            DomainName = $DomainName
+        }
+    }
+
+    Node FederationServer
+    {
+        LabDomainMachine Initialize {
+            AdminPassword = $AdminPassword
+            JoinDomain = $CorpDomainName
+            JoinOU = "OU=Privileged Servers,$RootDN"
+        }
+    }
+
+    Node BackendServer
+    {
+        LabDomainMachine Initialize {
+            AdminPassword = $AdminPassword
+            JoinDomain = $CorpDomainName
+            JoinOU = "OU=Standard Servers,$RootDN"
+        }
+    }
+
+    Node MiddlewareServer
+    {
+        LabDomainMachine Initialize {
+            AdminPassword = $AdminPassword
+            JoinDomain = $CorpDomainName
+            JoinOU = "OU=Standard Servers,$RootDN"
         }
     }
 }
