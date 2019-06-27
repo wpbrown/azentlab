@@ -22,6 +22,7 @@ Configuration AzEntLabConfiguration
     Import-DscResource -ModuleName xActiveDirectory
     Import-DscResource -ModuleName ComputerManagementDSC
     Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName SecurityPolicyDSC
     Import-DscResource -ModuleName AzEntLabResources
 
     $CorpDomainName = "corp.$DomainName"
@@ -207,6 +208,12 @@ Configuration AzEntLabConfiguration
             JoinOU = "OU=Standard Servers,$RootDN"
         }
 
+        WindowsFeatureSet Tools {
+            Name = @('RSAT-AD-Tools')
+            Ensure = 'Present'
+            IncludeAllSubFeature = $true
+        }
+
         Group RemoteUsers {
             GroupName = 'Administrators'
             MembersToInclude = @("$DomainNetbiosName\$DeveloperName")
@@ -215,6 +222,11 @@ Configuration AzEntLabConfiguration
 
         DomainTrustedZone TrustLocalDomain {
             DomainName = $DomainName
+        }
+
+        SecurityOption SecOpts {
+            Name = 'SecOpts'
+            User_Account_Control_Admin_Approval_Mode_for_the_Built_in_Administrator_account = 'Enabled'
         }
     }
 

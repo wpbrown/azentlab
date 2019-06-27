@@ -75,4 +75,12 @@ Configuration LabDomainMachine
         JoinOU = $JoinOU
         DependsOn = '[WaitForAll]WaitForDC'
     }
+
+    Registry DisableServerManager {
+        Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Server\ServerManager'
+        ValueName = 'DoNotOpenAtLogon'
+        Force = $true
+        ValueData = '1'
+        ValueType = 'Dword'
+    }
 }
