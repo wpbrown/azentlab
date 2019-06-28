@@ -1,0 +1,27 @@
+﻿<p>Hello, @User.Identity.Name!</p>
+<table border="1">
+    <tr>
+        <th>
+            Name
+        </th>
+        <th>
+            Value
+        </th>
+    </tr>
+
+    @foreach (KeyValuePair<string, string> header in ViewBag.Headers)
+    {
+        <tr>
+            <td>
+                @Html.DisplayFor(_ => header.Key)
+            </td>
+            <td>
+                @Html.DisplayFor(_ => header.Value)
+            </td>
+        </tr>
+    }
+</table>
+<p>Backend Data:</p>
+<pre>
+@(((Newtonsoft.Json.Linq.JObject)ViewBag.RemoteData).ToString(Newtonsoft.Json.Formatting.Indented))
+</pre>
