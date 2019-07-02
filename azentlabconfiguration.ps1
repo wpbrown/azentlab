@@ -129,7 +129,8 @@ Configuration DomainController
             PasswordNeverExpires = $true
             Path = Get-LabOUDN $DomainName 'Privileged Users'
             UserPrincipalName = "xoda@$DomainName"
-            # CommonName = 'Rick Sanchez (xoda)' Can't have path and commonname set together due to bug
+            # CommonName = 'Rick Sanchez (xoda)' 
+            # Can't have path and commonname set together due to bug
             # https://github.com/PowerShell/xActiveDirectory/issues/402
             GivenName = 'Rick'
             Surname = 'Sanchez'
@@ -210,7 +211,21 @@ Configuration DomainController
             Ensure = 'Present'
         }
 
-        # testapp
+        Script EnableGmsa {
+            GetScript = {
+                return @{ 'Result' = $null -ne (Get-KdsRootKey) }
+            }
+            TestScript = {
+                $state = [scriptblock]::Create($GetScript).Invoke()
+                return $state[0]['Result']
+            }
+            SetScript = {
+                Add-KdsRootKey -EffectiveTime ((Get-Date).AddHours(-10))
+            }
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADDomain]LabDomain'
+        }
+
+        # Test App Support
         xDnsRecord TestAppCorpDnsRecord {
             Name = 'testapp'
             Zone = $CorpDomainName
@@ -316,6 +331,44 @@ Configuration DomainController
                 Set-ADComputer -Identity 'appserv01' -PrincipalsAllowedToDelegateToAccount $principal
             }
             DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ01', '[xADComputer]AppServ02'
+        }
+
+        # OAKProxy Dev Support
+        xADComputer AppDev01 {
+            ComputerName = 'appdev01'
+            Path = Get-LabOUDN $DomainName 'Standard Servers'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADOrganizationalUnit]StandardServersOU', '[xADForestProperties]ForestProps'
+        }
+
+        xADGroup OakGmsaServers {
+            GroupName = 'OAKProxyServers'
+            GroupScope = 'DomainLocal'
+            Category = 'Security'
+            Path = Get-LabOUDN $DomainName 'Standard Servers'
+            MembersToInclude = @( 'appdev01$' )
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppDev01'
+        }
+
+        xADManagedServiceAccount OakGmsa {
+            ServiceAccountName = 'xgoakproxy'
+            AccountType = 'Group'
+            Members = @( 'OAKProxyServers' )
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADGroup]OakGmsaServers', '[Script]EnableGmsa'
+        }
+
+        $allTestAppSpns = @('http/testapp', "http/testapp.$CorpDomainName", "http/testapp.$DomainName",
+            'http/testappmid', "http/testappmid.$CorpDomainName", "http/testappmid.$DomainName")
+
+        ConstrainedDelegationAnyProtocolTo DelegateFromGmsa {
+            Source = 'xgoakproxy$'
+            TargetSpns = $allTestAppSpns
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADManagedServiceAccount]OakGmsa'
+        }
+
+        ConstrainedDelegationAnyProtocolTo DelegateFromDevUser {
+            Source = $DeveloperName
+            TargetSpns = $allTestAppSpns
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADUser]developerUser'
         }
     }
 }

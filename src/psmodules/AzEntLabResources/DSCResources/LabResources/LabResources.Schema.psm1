@@ -90,7 +90,7 @@ Configuration LabDomainMachine
 Configuration EnableTls12 
 {
     Import-DscResource -ModuleName PSDscResources
-    
+
     # Workaround .NET not using Tls12 by default. Breaks xRemoteFile request to Github.
     # https://github.com/PowerShell/xPSDesiredStateConfiguration/issues/393
     Script EnableTls12 {
@@ -103,6 +103,37 @@ Configuration EnableTls12
         GetScript = {
             return @{
                 Result = ([Net.ServicePointManager]::SecurityProtocol -match 'Tls12')
+            }
+        }
+    }
+}
+
+Configuration ConstrainedDelegationAnyProtocolTo
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [string]$Source,
+
+        [Parameter(Mandatory)]
+        [string[]]$TargetSpns
+    )
+
+    Script EnableProxyDelegation {
+        SetScript = {
+            $principal = Get-ADObject -Filter {SAMAccountName -eq $using:Source}
+            $principal | Set-ADAccountControl -TrustedToAuthForDelegation $true
+            $principal | Set-ADObject -Add @{'msDS-AllowedToDelegateTo' = [string[]]$using:TargetSpns}
+        }
+        TestScript = {
+            $TRUSTED_TO_AUTH_FOR_DELEGATION = 0x1000000
+            $principal = Get-ADObject -Filter {SAMAccountName -eq $using:Source} -Properties 'msDS-AllowedToDelegateTo','userAccountControl'
+            return ($null -ne $principal['msDS-AllowedToDelegateTo'].Value -and $null -eq (Compare-Object $principal['msDS-AllowedToDelegateTo'].Value $using:TargetSpns)) -and ($principal['userAccountControl'].Value -band $TRUSTED_TO_AUTH_FOR_DELEGATION)
+        }
+        GetScript = {
+            $principal = Get-ADObject -Filter {SAMAccountName -eq $using:Source} -Properties 'msDS-AllowedToDelegateTo','userAccountControl','samAccountName'
+            return @{
+                Result = $principal | ConvertTo-Json
             }
         }
     }
