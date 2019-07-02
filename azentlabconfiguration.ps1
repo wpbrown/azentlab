@@ -40,6 +40,7 @@ Configuration DomainController
 
     Import-DscResource -ModuleName xActiveDirectory
     Import-DscResource -ModuleName xDnsServer
+    Import-DscResource -ModuleName ActiveDirectoryCSDsc
     Import-DscResource -ModuleName PSDscResources
     Import-DscResource -ModuleName AzEntLabResources
 
@@ -57,13 +58,13 @@ Configuration DomainController
         DisableServerManager DSM {}
 
         WindowsFeatureSet Services {
-            Name = @('DNS', 'AD-Domain-Services')
+            Name = @('DNS', 'AD-Domain-Services', 'ADCS-Cert-Authority')
             Ensure = 'Present'
             IncludeAllSubFeature = $true
         }
 
         WindowsFeatureSet Tools {
-            Name = @('RSAT-AD-Tools', 'RSAT-DHCP', 'RSAT-DNS-Server', 'GPMC')
+            Name = @('RSAT-AD-Tools', 'RSAT-DHCP', 'RSAT-DNS-Server', 'GPMC', 'RSAT-ADCS')
             Ensure = 'Present'
             IncludeAllSubFeature = $true
         }
@@ -77,6 +78,16 @@ Configuration DomainController
             LogPath = 'C:\Adds\NTDS'
             SysvolPath = 'C:\Adds\SYSVOL'
             DependsOn = '[WindowsFeatureSet]Services'
+        }
+
+        AdcsCertificationAuthority CertificateAuthority
+        {
+            IsSingleInstance = 'Yes'
+            Ensure = 'Present'
+            Credential = $Credential
+            CAType  = 'EnterpriseRootCA'
+            CACommonName = "$($DomainNetbiosName.ToUpper()) Root CA"
+            DependsOn = '[WindowsFeatureSet]Services', '[xADDomain]LabDomain'
         }
 
         xADOrganizationalUnit StandardUsersOU {
@@ -517,7 +528,7 @@ Configuration FederationServer
         }
 
         WindowsFeatureSet Services {
-            Name = @('FS-FileServer')
+            Name = @('FS-FileServer','ADFS-Federation')
             Ensure = 'Present'
         }
 
