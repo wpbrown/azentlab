@@ -43,6 +43,19 @@ Configuration LabLocalAdmin
     }
 }
 
+Configuration DisableServerManager
+{
+    Import-DscResource -ModuleName PSDscResources
+
+    Registry DisableServerManager {
+        Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Server\ServerManager'
+        ValueName = 'DoNotOpenAtLogon'
+        Force = $true
+        ValueData = '1'
+        ValueType = 'Dword'
+    }
+}
+
 Configuration LabDomainMachine
 {
     param
@@ -57,30 +70,40 @@ Configuration LabDomainMachine
         [string]$JoinOU
     )
 
-    Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName PSDscResources 
+    Import-DscResource -ModuleName ComputerManagementDSC
 
     LabLocalAdmin LocalAdmin {
         Password = $AdminPassword
     }
 
-    WaitForAll WaitForDC {
-        NodeName = "domserv01.$JoinDomain"
-        ResourceName = '[xADForestProperties]ForestProps'
-    }
-    
     Computer JoinComputer {
         Name = 'localhost'
         DomainName = $JoinDomain
         Credential = $AdminPassword
         JoinOU = $JoinOU
-        DependsOn = '[WaitForAll]WaitForDC'
     }
 
-    Registry DisableServerManager {
-        Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Server\ServerManager'
-        ValueName = 'DoNotOpenAtLogon'
-        Force = $true
-        ValueData = '1'
-        ValueType = 'Dword'
+    DisableServerManager DSM {}
+}
+
+Configuration EnableTls12 
+{
+    Import-DscResource -ModuleName PSDscResources
+    
+    # Workaround .NET not using Tls12 by default. Breaks xRemoteFile request to Github.
+    # https://github.com/PowerShell/xPSDesiredStateConfiguration/issues/393
+    Script EnableTls12 {
+        SetScript = {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol.toString() + ', ' + [Net.SecurityProtocolType]::Tls12
+        }
+        TestScript = {
+            return ([Net.ServicePointManager]::SecurityProtocol -match 'Tls12')
+        }
+        GetScript = {
+            return @{
+                Result = ([Net.ServicePointManager]::SecurityProtocol -match 'Tls12')
+            }
+        }
     }
 }

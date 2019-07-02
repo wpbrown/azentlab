@@ -5,14 +5,34 @@
     "adminPassword": {
       "type": "securestring",
       "metadata": {
-          "description": "Password for the domain admin (xoda) and local admins (localadmin)."
+        "description": "Password for the domain admin (xoda) and local admins (localadmin)."
       }
     },
-    "azentlabManagementResourceGroup": {
-      "type": "string",
-      "defaultValue": "azentlab-mgmt-rg",
+    "userPassword": {
+      "type": "securestring",
       "metadata": {
-        "description": "Resource group with lab management resources."
+        "description": "Password for the standard users and service accounts."
+      }
+    },
+    "domainName": {
+      "type": "string",
+      "defaultValue": "contoso.com",
+      "metadata": {
+        "description": "Name of the lab AD DS domain."
+      }
+    },
+    "domainNetbiosName": {
+      "type": "string",
+      "defaultValue": "contoso",
+      "metadata": {
+        "description": "Netbios name of the lab AD DS domain."
+      }
+    },
+    "developerName": {
+      "type": "string",
+      "defaultValue": "developer",
+      "metadata": {
+        "description": "Name of the domain account for the developer."
       }
     },
     "shutdownTime": {
@@ -95,6 +115,20 @@
     "devVmImageSku": {
       "type": "string",
       "defaultValue": "vs-2019-ent-ws2019"
+    },
+    "_artifactsLocation": {
+      "type": "string",
+      "metadata": {
+        "description": "The base URI where artifacts required by this template are located including a trailing '/'"
+      },
+      "defaultValue": "https://github.com/wpbrown/azentlab/releases/download/"
+    },
+    "_artifactsLocationSasToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "The sasToken required to access _artifactsLocation.  When the template is deployed using the accompanying scripts, a sasToken will be automatically generated. Use the defaultValue if the staging location is not secured."
+      },
+      "defaultValue": ""
     }
   },
   "variables": {
@@ -120,7 +154,7 @@
       {
         "name": "domserv01",
         "licenseType": "Windows_Server",
-        "dscNodeConfiguration": "AzEntLabConfiguration.DomainController",
+        "dscNodeConfiguration": "DomainController",
         "ipAddress": "[parameters('labNetworkDomainControllerIp')]",
         "dnsServers": [
           "168.63.129.16"
@@ -130,17 +164,17 @@
       {
         "name": "domserv02",
         "licenseType": "Windows_Server",
-        "dscNodeConfiguration": "AzEntLabConfiguration.FederationServer"
+        "dscNodeConfiguration": "FederationServer"
       },
       {
         "name": "appserv01",
         "licenseType": "Windows_Server",
-        "dscNodeConfiguration": "AzEntLabConfiguration.BackendServer"
+        "dscNodeConfiguration": "BackendServer"
       },
       {
         "name": "appserv02",
         "licenseType": "Windows_Server",
-        "dscNodeConfiguration": "AzEntLabConfiguration.MiddlewareServer"
+        "dscNodeConfiguration": "MiddlewareServer"
       },
       {
         "name": "appdev01",
@@ -148,12 +182,12 @@
         "vmSize": "[parameters('devVmSize')]",
         "diskSku": "[parameters('devDiskSku')]",
         "licenseType": "Windows_Server",
-        "dscNodeConfiguration": "AzEntLabConfiguration.DevServer"
+        "dscNodeConfiguration": "DevServer"
       },
       {
         "name": "client01",
         "licenseType": "Windows_Client",
-        "dscNodeConfiguration": "AzEntLabConfiguration.Client"
+        "dscNodeConfiguration": "Client"
       }
     ]
   },
@@ -263,7 +297,7 @@
       "location": "[resourceGroup().location]",
       "dependsOn": [
         "[concat(variables('vmConfigurations')[copyIndex()].name, '-nic')]",
-        "[if(equals(copyIndex(), 0), 'lab-vnet', concat(variables('vmConfigurations')[0].name, '-dscext'))]"
+        "[if(equals(variables('vmConfigurations')[copyIndex()].name, 'domserv01'), 'lab-vnet', 'domserv01-dscext')]"
       ],
       "properties": {
         "hardwareProfile": {
@@ -314,7 +348,7 @@
             "typeHandlerVersion": "1.9",
             "autoUpgradeMinorVersion": true,
             "settings": {
-              "commandToExecute": "powershell.exe -Command \"& {Set-ExecutionPolicy Bypass -Scope LocalMachine -Force}\""
+              "commandToExecute": "powershell.exe -Command \"& { Set-ExecutionPolicy Bypass -Scope LocalMachine -Force; Start-Service -Name winrm; sc.exe config winrm start= auto }\""
             }
           }
         },
@@ -334,24 +368,31 @@
             "autoUpgradeMinorVersion": true,
             "forceUpdateTag": "1",
             "settings": {
-              "configurationArguments": {
-                "RegistrationUrl": "[reference(resourceId(parameters('azentlabManagementResourceGroup'), 'Microsoft.Automation/automationAccounts/', 'lab-aa'), '2018-01-15').registrationUrl]",
-                "NodeConfigurationName": "[variables('vmConfigurations')[copyIndex()].dscNodeConfiguration]",
-                "ConfigurationMode": "ApplyandAutoCorrect",
-                "RebootNodeIfNeeded": true,
-                "ActionAfterReboot": "ContinueConfiguration"
+              "configuration": {
+                "url": "[uri(parameters('_artifactsLocation'), 'azentlabconfiguration.ps1.zip')]",
+                "script": "azentlabconfiguration.ps1",
+                "function": "[variables('vmConfigurations')[copyIndex()].dscNodeConfiguration]"
               },
-              "advancedOptions": {
-                "forcePullAndApply": "[equals(copyIndex(), 0)]"
+              "configurationArguments": {
+                "DomainName": "[parameters('domainName')]",
+                "DomainNetbiosName": "[parameters('domainNetbiosName')]",
+                "DeveloperName": "[parameters('developerName')]"
               }
             },
             "protectedSettings": {
               "configurationArguments": {
-                "RegistrationKey": {
-                  "UserName": "not_used",
-                  "Password": "[listKeys(resourceId(parameters('azentlabManagementResourceGroup'), 'Microsoft.Automation/automationAccounts/', 'lab-aa'), '2018-01-15').Keys[0].value]"
-                }
-              }
+                "AdminPassword": {
+                  "userName": "[concat(parameters('domainNetbiosName'),'\\xoda')]",
+                  "Password": "[parameters('adminPassword')]"
+                },
+                "UserPassword": {
+                  "userName": "not_used",
+                  "Password": "[parameters('userPassword')]"
+                },
+                "TestAppUrl": "[uri(parameters('_artifactsLocation'), concat('testapp.zip', parameters('_artifactsLocationSasToken')))]",
+                "TestAppMidUrl": "[uri(parameters('_artifactsLocation'), concat('testappmid.zip', parameters('_artifactsLocationSasToken')))]"
+              },
+              "configurationUrlSasToken": "[parameters('_artifactsLocationSasToken')]"
             }
           }
         }

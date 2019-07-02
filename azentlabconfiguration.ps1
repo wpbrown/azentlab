@@ -1,4 +1,21 @@
-Configuration AzEntLabConfiguration
+function Get-LabADDomainName([string]$DomainName) {
+    "corp.$DomainName"
+}
+
+function Get-LabRootDN([string]$DomainName) {
+    "DC=$((Get-LabADDomainName $DomainName).Replace('.', ',DC='))"
+}
+
+function Get-LabOUDN([string]$DomainName, [string]$OU) {
+    "OU=$OU,$(Get-LabRootDN $DomainName)"
+}
+
+Configuration xExtraDeps
+{
+    Import-DscResource -ModuleName ComputerManagementDsc
+}
+
+Configuration DomainController
 {
     param
     (
@@ -15,21 +32,30 @@ Configuration AzEntLabConfiguration
         [string]$DomainNetbiosName,
 
         [Parameter(Mandatory)]
-        [string]$DeveloperName
+        [string]$DeveloperName,
+
+        [Parameter(ValueFromRemainingArguments)]
+        $ExtraArgs
     )
 
-    # Using a single import call results in an error compiling in Azure Automation DSC.
     Import-DscResource -ModuleName xActiveDirectory
-    Import-DscResource -ModuleName ComputerManagementDSC
+    Import-DscResource -ModuleName xDnsServer
     Import-DscResource -ModuleName PSDscResources
-    Import-DscResource -ModuleName SecurityPolicyDSC
     Import-DscResource -ModuleName AzEntLabResources
 
-    $CorpDomainName = "corp.$DomainName"
-    $RootDN = "DC=$($CorpDomainName.Replace('.', ',DC='))"
+    $CorpDomainName = Get-LabADDomainName $DomainName
+    $RootDN = Get-LabRootDN $DomainName
     
-    Node DomainController
+    Node localhost
     {
+        LocalConfigurationManager {
+            ActionAfterReboot = 'ContinueConfiguration'
+            ConfigurationMode = 'ApplyAndAutoCorrect'
+            RebootNodeIfNeeded = $true
+        }
+
+        DisableServerManager DSM {}
+
         WindowsFeatureSet Services {
             Name = @('DNS', 'AD-Domain-Services')
             Ensure = 'Present'
@@ -93,8 +119,7 @@ Configuration AzEntLabConfiguration
             ForestName = $CorpDomainName
             UserPrincipalNameSuffixToAdd = "$DomainName", "local.$DomainName", "fed.$DomainName"
             ServicePrincipalNameSuffixToAdd = "$DomainName"
-            DependsOn = '[xADDomain]LabDomain', '[xADOrganizationalUnit]StandardClientsOU', 
-                '[xADOrganizationalUnit]StandardServersOU', '[xADOrganizationalUnit]PrivilegedServersOU'
+            DependsOn = '[xADDomain]LabDomain'
         }
 
         xADUser xoda {
@@ -102,7 +127,7 @@ Configuration AzEntLabConfiguration
             UserName = 'xoda'
             Password = $AdminPassword
             PasswordNeverExpires = $true
-            Path = "OU=Privileged Users,$RootDN"
+            Path = Get-LabOUDN $DomainName 'Privileged Users'
             UserPrincipalName = "xoda@$DomainName"
             # CommonName = 'Rick Sanchez (xoda)' Can't have path and commonname set together due to bug
             # https://github.com/PowerShell/xActiveDirectory/issues/402
@@ -117,7 +142,7 @@ Configuration AzEntLabConfiguration
             UserName = 'user01'
             Password = $UserPassword
             PasswordNeverExpires = $true
-            Path = "OU=Standard Users,$RootDN"
+            Path = Get-LabOUDN $DomainName 'Standard Users'
             UserPrincipalName = "user01@$DomainName"
             CommonName = 'Peter Griffen (user01)'
             GivenName = 'Peter'
@@ -131,7 +156,7 @@ Configuration AzEntLabConfiguration
             UserName = 'user02'
             Password = $UserPassword
             PasswordNeverExpires = $true
-            Path = "OU=Standard Users,$RootDN"
+            Path = Get-LabOUDN $DomainName 'Standard Users'
             UserPrincipalName = "user02@$DomainName"
             CommonName = 'Homer Simpson (user02)'
             GivenName = 'Homer'
@@ -145,7 +170,7 @@ Configuration AzEntLabConfiguration
             UserName = 'user04'
             Password = $UserPassword
             PasswordNeverExpires = $true
-            Path = "OU=Standard Users,$RootDN"
+            Path = Get-LabOUDN $DomainName 'Standard Users'
             UserPrincipalName = "user04@local.$DomainName"
             CommonName = 'Ned Flanders (user04)'
             GivenName = 'Ned'
@@ -159,7 +184,7 @@ Configuration AzEntLabConfiguration
             UserName = 'user05'
             Password = $UserPassword
             PasswordNeverExpires = $true
-            Path = "OU=Standard Users,$RootDN"
+            Path = Get-LabOUDN $DomainName 'Standard Users'
             UserPrincipalName = "user05@fed.$DomainName"
             CommonName = 'Marge Simpson (user05)'
             GivenName = 'Marge'
@@ -173,20 +198,160 @@ Configuration AzEntLabConfiguration
             UserName = $DeveloperName
             Password = $UserPassword
             PasswordNeverExpires = $true
-            Path = "OU=Standard Users,$RootDN"
+            Path = Get-LabOUDN $DomainName 'Standard Users'
             UserPrincipalName = "$DeveloperName@$DomainName"
             CommonName = "$DeveloperName ($DeveloperName)"
             Description = 'The lab developers user.'
             DependsOn = '[xADOrganizationalUnit]StandardUsersOU', '[xADForestProperties]ForestProps'
         }
-    }
 
-    Node Client
+        xDnsServerPrimaryZone PrimaryRoot {
+            Name = $DomainName
+            Ensure = 'Present'
+        }
+
+        # testapp
+        xDnsRecord TestAppCorpDnsRecord {
+            Name = 'testapp'
+            Zone = $CorpDomainName
+            Target = "appserv01.$CorpDomainName"
+            Type = 'CName'
+            Ensure = 'Present'
+            DependsOn = '[WindowsFeatureSet]Tools'
+        }
+
+        xDnsRecord TestAppDnsRecord {
+            Name = 'testapp'
+            Zone = $DomainName
+            Target = "appserv01.$CorpDomainName"
+            Type = 'CName'
+            Ensure = 'Present'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xDnsServerPrimaryZone]PrimaryRoot'
+        }
+
+        xDnsRecord TestAppMidCorpDnsRecord {
+            Name = 'testappmid'
+            Zone = $CorpDomainName
+            Target = "appserv02.$CorpDomainName"
+            Type = 'CName'
+            Ensure = 'Present'
+            DependsOn = '[WindowsFeatureSet]Tools'
+        }
+
+        xDnsRecord TestAppMidDnsRecord {
+            Name = 'testappmid'
+            Zone = $DomainName
+            Target = "appserv02.$CorpDomainName"
+            Type = 'CName'
+            Ensure = 'Present'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xDnsServerPrimaryZone]PrimaryRoot'
+        }
+
+        # xADComputer fails to move object to proper OU if already exists
+        # Need to file the bug.
+        xADComputer AppServ01 {
+            ComputerName = 'appserv01'
+            Path = Get-LabOUDN $DomainName 'Standard Servers'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADOrganizationalUnit]StandardServersOU', '[xADForestProperties]ForestProps'
+        }
+
+        xADComputer AppServ02 {
+            ComputerName = 'appserv02'
+            Path = Get-LabOUDN $DomainName 'Standard Servers'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADOrganizationalUnit]StandardServersOU', '[xADForestProperties]ForestProps'
+        }
+
+        # The ServicePrincipalNames attribute of xADComputer has a bug that fails on creation so we add them here
+        # Need to file the bug.
+        xADServicePrincipalName TestAppSpnShort {
+            ServicePrincipalName = 'http/testapp'
+            Account = 'appserv01$'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ01'
+        }
+
+        xADServicePrincipalName TestAppCorpSpnLong {
+            ServicePrincipalName = "http/testapp.$CorpDomainName"
+            Account = 'appserv01$'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ01'
+        }
+
+        xADServicePrincipalName TestAppSpnLong {
+            ServicePrincipalName = "http/testapp.$DomainName"
+            Account = 'appserv01$'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ01'
+        }
+
+        xADServicePrincipalName TestAppMidSpnShort {
+            ServicePrincipalName = 'http/testappmid'
+            Account = 'appserv02$'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ02'
+        }
+
+        xADServicePrincipalName TestAppMidCorpSpnLong {
+            ServicePrincipalName = "http/testappmid.$CorpDomainName"
+            Account = 'appserv02$'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ02'
+        }
+
+        xADServicePrincipalName TestAppMidSpnLong {
+            ServicePrincipalName = "http/testappmid.$DomainName"
+            Account = 'appserv02$'
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ02'
+        }
+
+        Script EnableMiddlewareConstrainedDelegation {
+            GetScript = {
+                try {
+                    $principal = Get-ADComputer -Identity 'appserv01' -Properties 'msDS-AllowedToActOnBehalfOfOtherIdentity'
+                    $value =  $principal.'msDS-AllowedToActOnBehalfOfOtherIdentity'.Access.IdentityReference.Value
+                } catch { $value = $null }
+                return @{ 'Result' = $value }
+            }
+            TestScript = {
+                $state = [scriptblock]::Create($GetScript).Invoke()
+                return ($state[0]['Result'] -eq "$using:DomainNetbiosName\appserv02$")
+            }
+            SetScript = {
+                $principal = Get-ADComputer -Identity 'appserv02'
+                Set-ADComputer -Identity 'appserv01' -PrincipalsAllowedToDelegateToAccount $principal
+            }
+            DependsOn = '[WindowsFeatureSet]Tools', '[xADComputer]AppServ01', '[xADComputer]AppServ02'
+        }
+    }
+}
+
+Configuration Client
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [PSCredential]$AdminPassword,
+
+        [Parameter(Mandatory)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory)]
+        [string]$DomainNetbiosName,
+
+        [Parameter(ValueFromRemainingArguments)]
+        $ExtraArgs
+    )
+
+    Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName AzEntLabResources
+    
+    Node localhost
     {
+        LocalConfigurationManager {
+            ActionAfterReboot = 'ContinueConfiguration'
+            ConfigurationMode = 'ApplyAndAutoCorrect'
+            RebootNodeIfNeeded = $true
+        }
+
         LabDomainMachine Initialize {
             AdminPassword = $AdminPassword
-            JoinDomain = $CorpDomainName
-            JoinOU = "OU=Standard Clients,$RootDN"
+            JoinDomain = Get-LabADDomainName $DomainName
+            JoinOU = Get-LabOUDN $DomainName 'Standard Clients'
         }
 
         Group RemoteUsers {
@@ -199,17 +364,48 @@ Configuration AzEntLabConfiguration
             DomainName = $DomainName
         }
     }
+}
 
-    Node DevServer
+Configuration DevServer
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [PSCredential]$AdminPassword,
+
+        [Parameter(Mandatory)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory)]
+        [string]$DomainNetbiosName,
+
+        [Parameter(Mandatory)]
+        [string]$DeveloperName,
+
+        [Parameter(ValueFromRemainingArguments)]
+        $ExtraArgs
+    )
+
+    Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName AzEntLabResources
+    Import-DscResource -ModuleName SecurityPolicyDSC
+    
+    Node localhost
     {
+        LocalConfigurationManager {
+            ActionAfterReboot = 'ContinueConfiguration'
+            ConfigurationMode = 'ApplyAndAutoCorrect'
+            RebootNodeIfNeeded = $true
+        }
+
         LabDomainMachine Initialize {
             AdminPassword = $AdminPassword
-            JoinDomain = $CorpDomainName
-            JoinOU = "OU=Standard Servers,$RootDN"
+            JoinDomain = Get-LabADDomainName $DomainName
+            JoinOU = Get-LabOUDN $DomainName 'Standard Servers'
         }
 
         WindowsFeatureSet Tools {
-            Name = @('RSAT-AD-Tools')
+            Name = @('RSAT-AD-Tools', 'RSAT-DNS-Server')
             Ensure = 'Present'
             IncludeAllSubFeature = $true
         }
@@ -229,31 +425,255 @@ Configuration AzEntLabConfiguration
             User_Account_Control_Admin_Approval_Mode_for_the_Built_in_Administrator_account = 'Enabled'
         }
     }
+}
 
-    Node FederationServer
+Configuration FederationServer
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [PSCredential]$AdminPassword,
+
+        [Parameter(Mandatory)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory)]
+        [string]$DomainNetbiosName,
+
+        [Parameter(ValueFromRemainingArguments)]
+        $ExtraArgs
+    )
+
+    Import-DscResource -ModuleName xSmbShare
+    Import-DscResource -ModuleName xSystemSecurity
+    Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName AzEntLabResources
+    
+    Node localhost
     {
+        LocalConfigurationManager {
+            ActionAfterReboot = 'ContinueConfiguration'
+            ConfigurationMode = 'ApplyAndAutoCorrect'
+            RebootNodeIfNeeded = $true
+        }
+
         LabDomainMachine Initialize {
             AdminPassword = $AdminPassword
-            JoinDomain = $CorpDomainName
-            JoinOU = "OU=Privileged Servers,$RootDN"
+            JoinDomain = Get-LabADDomainName $DomainName
+            JoinOU = Get-LabOUDN $DomainName 'Privileged Servers'
+        }
+
+        WindowsFeatureSet Services {
+            Name = @('FS-FileServer')
+            Ensure = 'Present'
+        }
+
+        # File Server
+        File LabDir {
+            DestinationPath = 'C:\shared'
+            Type = 'Directory'
+        }
+
+        File ScratchDir {
+            DestinationPath = 'D:\shared'
+            Type = 'Directory'
+        }
+
+        xSmbShare LabFileshare {
+            Name = 'lab'
+            Path = 'C:\shared'
+            FullAccess = 'Authenticated Users'
+            DependsOn = '[WindowsFeatureSet]Services', '[File]LabDir'
+        }
+
+        xSmbShare ScratchFileshare {
+            Name = 'scratch'
+            Path = 'D:\shared'
+            FullAccess = 'Authenticated Users'
+            DependsOn = '[WindowsFeatureSet]Services', '[File]ScratchDir'
+        }
+
+        xFileSystemAccessRule LabDirAcl {
+            Path = 'C:\shared'
+            Identity = 'Authenticated Users'
+            Rights = 'Modify'
+            DependsOn = '[File]LabDir'
+        }
+
+        xFileSystemAccessRule ScratchDirAcl {
+            Path = 'D:\shared'
+            Identity = 'Authenticated Users'
+            Rights = 'Modify'
+            DependsOn = '[File]ScratchDir'
         }
     }
+}
 
-    Node BackendServer
-    {
-        LabDomainMachine Initialize {
-            AdminPassword = $AdminPassword
-            JoinDomain = $CorpDomainName
-            JoinOU = "OU=Standard Servers,$RootDN"
-        }
+Configuration xTestAppServer
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory)]
+        [string]$PackageUrl
+    )
+
+    Import-DscResource -ModuleName xWebAdministration
+    Import-DscResource -ModuleName xPSDesiredStateConfiguration
+    Import-DscResource -ModuleName PSDscResources
+    Import-DscResource -ModuleName AzEntLabResources
+
+    WindowsFeatureSet Services {
+        Name = @('Web-Webserver', 'Web-Asp-Net45', 'Web-Windows-Auth')
+        Ensure = 'Present'
     }
 
-    Node MiddlewareServer
+    WindowsFeatureSet Tools {
+        Name = @('Web-Mgmt-Console', 'Web-Scripting-Tools')
+        Ensure = 'Present'
+    }
+
+    EnableTls12 ETls12 {}
+
+    xRemoteFile DownloadTestApp {
+        Uri = $PackageUrl
+        DestinationPath = 'C:\Packages\appPackage.zip'
+        MatchSource = $false
+        DependsOn = '[EnableTls12]ETls12'
+    }
+
+    Archive UnpackTestApp {
+        Path = 'C:\Packages\appPackage.zip'
+        Destination = "C:\inetpub\$Name"
+        DependsOn = '[xRemoteFile]DownloadTestApp'
+    }
+
+    xWebsite TestAppSite {
+        Ensure = 'Present'
+        Name = $Name
+        State = 'Started'
+        PhysicalPath = "C:\inetpub\$Name"
+        AuthenticationInfo = MSFT_xWebAuthenticationInformation {
+            Anonymous = $false
+            Basic = $false
+            Digest = $false
+            Windows = $true
+        }
+        BindingInfo = @(
+            MSFT_xWebBindingInformation {
+                Protocol = 'http'
+                Hostname = "$Name.$(Get-LabADDomainName $DomainName)"
+            }
+            MSFT_xWebBindingInformation {
+                Protocol = 'http'
+                Hostname = "$Name.$DomainName"
+            }
+            MSFT_xWebBindingInformation {
+                Protocol = 'http'
+                Hostname = $Name
+            }
+            MSFT_xWebBindingInformation {
+                Protocol = 'http'
+                Hostname = "${Name}ntlm.$DomainName"
+            }
+            MSFT_xWebBindingInformation {
+                Protocol = 'http'
+                Hostname = "${Name}ntlm"
+            }
+        )
+        DependsOn = '[WindowsFeatureSet]Services', '[Archive]UnpackTestApp'
+    }
+}
+
+Configuration BackendServer
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [PSCredential]$AdminPassword,
+
+        [Parameter(Mandatory)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory)]
+        [string]$DomainNetbiosName,
+
+        [Parameter(Mandatory)]
+        [string]$TestAppUrl,
+
+        [Parameter(ValueFromRemainingArguments)]
+        $ExtraArgs
+    )
+
+    Import-DscResource -ModuleName AzEntLabResources
+    
+    Node localhost
     {
+        LocalConfigurationManager {
+            ActionAfterReboot = 'ContinueConfiguration'
+            ConfigurationMode = 'ApplyAndAutoCorrect'
+            RebootNodeIfNeeded = $true
+        }
+
         LabDomainMachine Initialize {
             AdminPassword = $AdminPassword
-            JoinDomain = $CorpDomainName
-            JoinOU = "OU=Standard Servers,$RootDN"
+            JoinDomain = Get-LabADDomainName $DomainName
+            JoinOU = Get-LabOUDN $DomainName 'Standard Servers'
+        }
+
+        xTestAppServer TestApp {
+            Name = 'testapp'
+            DomainName = $DomainName
+            PackageUrl = $TestAppUrl
+        }
+    }
+}
+
+Configuration MiddlewareServer
+{
+    param
+    (
+        [Parameter(Mandatory)]
+        [PSCredential]$AdminPassword,
+
+        [Parameter(Mandatory)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory)]
+        [string]$DomainNetbiosName,
+
+        [Parameter(Mandatory)]
+        [string]$TestAppMidUrl,
+
+        [Parameter(ValueFromRemainingArguments)]
+        $ExtraArgs
+    )
+
+    Import-DscResource -ModuleName AzEntLabResources
+    
+    Node localhost
+    {
+        LocalConfigurationManager {
+            ActionAfterReboot = 'ContinueConfiguration'
+            ConfigurationMode = 'ApplyAndAutoCorrect'
+            RebootNodeIfNeeded = $true
+        }
+
+        LabDomainMachine Initialize {
+            AdminPassword = $AdminPassword
+            JoinDomain = Get-LabADDomainName $DomainName
+            JoinOU = Get-LabOUDN $DomainName 'Standard Servers'
+        }
+
+        xTestAppServer TestApp {
+            Name = 'testappmid'
+            DomainName = $DomainName
+            PackageUrl = $TestAppMidUrl
         }
     }
 }
