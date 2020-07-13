@@ -1,5 +1,5 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
     "adminPassword": {
@@ -67,34 +67,15 @@
       "type": "string",
       "defaultValue": "10.0.2.0/23"
     },
-    "labNetworkGatewaySubnet": {
-      "type": "string",
-      "defaultValue": "10.0.0.0/27"
-    },
-    "labNetworkAppGatewaySubnet": {
-      "type": "string",
-      "defaultValue": "10.0.0.32/28"
-    },
     "labNetworkDomainControllerIp": {
       "type": "string",
       "defaultValue": "10.0.2.10"
     },
-    "labNetworkP2sVpnClients": {
-      "type": "string",
-      "defaultValue": "10.0.4.0/24"
-    },
     "labNetworkIngressAllowed": {
       "type": "array",
       "defaultValue": [
-        "[parameters('labNetworkP2sVpnClients')]"
+        "10.0.0.0/16"
       ]
-    },
-    "vpnCaCert": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "If using VPN P2S connections to connect to the lab, provide a CA cert."
-      }
     },
     "vmSize": {
       "type": "string",
@@ -238,18 +219,6 @@
               "networkSecurityGroup": {
                 "id": "[resourceId('Microsoft.Network/networkSecurityGroups', 'lab-nsg')]"
               }
-            }
-          },
-          {
-            "name": "ApplicationGatewaySubnet",
-            "properties": {
-              "addressPrefix": "[parameters('labNetworkAppGatewaySubnet')]"
-            }
-          },
-          {
-            "name": "GatewaySubnet",
-            "properties": {
-              "addressPrefix": "[parameters('labNetworkGatewaySubnet')]"
             }
           }
         ],
@@ -424,61 +393,6 @@
         "name": "shutdownCopy",
         "count": "[length(variables('vmConfigurations'))]"
       }
-    },
-    {
-      "apiVersion": "2018-08-01",
-      "type": "Microsoft.Network/publicIPAddresses",
-      "name": "lab-vgw-pip",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "publicIPAllocationMethod": "Dynamic"
-      }
-    },
-    {
-      "apiVersion": "2018-08-01",
-      "type": "Microsoft.Network/virtualNetworkGateways",
-      "name": "lab-vgw",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "ipConfigurations": [
-          {
-            "name": "default",
-            "properties": {
-              "privateIPAllocationMethod": "Dynamic",
-              "publicIPAddress": {
-                "id": "[resourceId('Microsoft.Network/publicIPAddresses', 'lab-vgw-pip')]"
-              },
-              "subnet": {
-                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'lab-vnet', 'GatewaySubnet')]"
-              }
-            }
-          }
-        ],
-        "sku": {
-          "name": "Basic",
-          "tier": "Basic",
-          "capacity": 2
-        },
-        "gatewayType": "Vpn",
-        "vpnType": "RouteBased",
-        "enableBgp": false,
-        "activeActive": false,
-        "vpnClientConfiguration": {
-          "vpnClientAddressPool": {
-            "addressPrefixes": [
-              "[parameters('labNetworkP2sVpnClients')]"
-            ]
-          },
-          "vpnClientProtocols": [
-            "SSTP"
-          ],
-          "vpnClientRootCertificates": "[if(not(empty(parameters('vpnCaCert'))), json(concat('[{\"name\": \"cacert\", \"properties\": { \"publicCertData\": \"', parameters('vpnCaCert'), '\" }}]')),  json('null'))]"
-        }
-      },
-      "dependsOn": [
-        "lab-vgw-pip",
-        "lab-vnet"
-      ]
     }
   ],
   "outputs": {}
