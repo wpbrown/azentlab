@@ -84,7 +84,7 @@ Configuration DomainController
         {
             IsSingleInstance = 'Yes'
             Ensure = 'Present'
-            Credential = $Credential
+            Credential = $AdminPassword
             CAType  = 'EnterpriseRootCA'
             CACommonName = "$($DomainNetbiosName.ToUpper()) Root CA"
             DependsOn = '[WindowsFeatureSet]Services', '[xADDomain]LabDomain'
