@@ -58,7 +58,7 @@ Configuration DomainController
         DisableServerManager DSM {}
 
         WindowsFeatureSet Services {
-            Name = @('DNS', 'AD-Domain-Services', 'ADCS-Cert-Authority')
+            Name = @('DNS', 'AD-Domain-Services')
             Ensure = 'Present'
             IncludeAllSubFeature = $true
         }
@@ -80,6 +80,13 @@ Configuration DomainController
             DependsOn = '[WindowsFeatureSet]Services'
         }
 
+        WindowsFeature CertService {
+            Name = 'ADCS-Cert-Authority'
+            Ensure = 'Present'
+            IncludeAllSubFeature = $true
+            DependsOn = '[xADDomain]LabDomain'
+        }
+
         AdcsCertificationAuthority CertificateAuthority
         {
             IsSingleInstance = 'Yes'
@@ -87,7 +94,7 @@ Configuration DomainController
             Credential = $AdminPassword
             CAType  = 'EnterpriseRootCA'
             CACommonName = "$($DomainNetbiosName.ToUpper()) Root CA"
-            DependsOn = '[WindowsFeatureSet]Services', '[xADDomain]LabDomain'
+            DependsOn = '[WindowsFeature]CertService', '[xADDomain]LabDomain'
         }
 
         xADOrganizationalUnit StandardUsersOU {
